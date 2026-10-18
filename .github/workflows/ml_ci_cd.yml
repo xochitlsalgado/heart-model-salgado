@@ -1,22 +1,59 @@
-name: Modelops deploy
+name: ML heart-model
+
 on:
-push:
-branches: [ master ]
-pull_request:
-branches: [ master ]
-repository_dispatch:
-types: [ml_ci_cd]
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  repository_dispatch:
+    types: [ml_ci_cd]
+
 jobs:
-ml_ci_cd:
-runs-on: ubuntu-latest
-strategy:
-matrix:
-python-version: [3.8]
-steps:
-- uses: actions/checkout@v3
-- name: Set up Python
-uses: actions/setup-python@v4
-with:
-python-version: ${{ matrix.python-version }}
-- name: list
-run: python --version
+  ml_ci_cd:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: python version
+      run: python --version
+
+    - name: pip install
+      run: pip install -r requirements.txt
+
+    - name: download dataset
+      run: |
+        if [ -n "${{ github.event.client_payload.dataseturl }}" ]; then
+          wget -O data/cars_dataset.csv "${{ github.event.client_payload.dataseturl }}"
+        fi
+
+    - name: train model
+      run: python model/train.py
+
+    - name: docker build
+      run: |
+        if [ -n "${{ github.event.client_payload.sha }}" ]; then
+          TAG="${{ github.event.client_payload.sha }}"
+        else
+          TAG="${{ github.sha }}"
+        fi
+        echo "TAG=$TAG" >> $GITHUB_ENV
+        docker build -t ${{ secrets.DOCKER_USER }}/${{ secrets.MODEL_NAME }}:$TAG .
+
+    - name: docker login
+      env:
+        DOCKER_USER: ${{ secrets.DOCKER_USER }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
+
+    - name: docker Push
+      run: |
+        docker push ${{ secrets.DOCKER_USER }}/${{ secrets.MODEL_NAME }}:${{ env.TAG }}
+        
