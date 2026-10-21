@@ -1,3 +1,4 @@
+cat << 'EOF' > .github/workflows/ml_ci_cd.yml
 name: ML heart-model
 
 on:
@@ -29,12 +30,18 @@ jobs:
 
     - name: download dataset
       run: |
+        mkdir -p data
         if [ -n "${{ github.event.client_payload.dataseturl }}" ]; then
           wget -O data/cars_dataset.csv "${{ github.event.client_payload.dataseturl }}"
         fi
 
     - name: train model
-      run: python model/train.py
+      run: |
+        if [ -f "data/cars_dataset.csv" ]; then
+          python model/train.py
+        else
+          echo "No se recibio dataseturl por API dispatch. Omitiendo train.py durante push por defecto."
+        fi
 
     - name: docker build
       run: |
@@ -56,4 +63,4 @@ jobs:
     - name: docker Push
       run: |
         docker push ${{ secrets.DOCKER_USER }}/${{ secrets.MODEL_NAME }}:${{ env.TAG }}
-        
+EOF
