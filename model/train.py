@@ -1,11 +1,22 @@
-import pandas as pd
+import argparse
 import pathlib
+import pandas as pd
 from xgboost import XGBRegressor
 from sklearn.model_selection import train_test_split
 from joblib import dump
 
-# 1. Cargar dataset de autos
-data = pd.read_csv(pathlib.Path('data/cars_dataset.csv'))
+# 0. Configurar lectura de argumentos CLI (--dataset)
+parser = argparse.ArgumentParser(description="Entrenar modelo XGBoost para precios de autos")
+parser.add_argument("--dataset", type=str, default="data/cars_dataset.csv", help="Ruta al archivo CSV del dataset")
+args = parser.parse_args()
+
+# 1. Cargar dataset de autos desde la ruta recibida por parámetro
+dataset_path = pathlib.Path(args.dataset)
+if not dataset_path.exists():
+    raise FileNotFoundError(f"No se encontró el archivo de datos en: {dataset_path}")
+
+print(f"Cargando dataset desde: {dataset_path}")
+data = pd.read_csv(dataset_path)
 
 # Tomar una muestra si es un dataset muy grande para acelerar el entrenamiento
 if len(data) > 10000:
@@ -13,9 +24,12 @@ if len(data) > 10000:
 
 # 2. Definir Target
 target_col = 'listing_price' if 'listing_price' in data.columns else 'current_market_price'
+if target_col not in data.columns:
+    target_col = 'price' if 'price' in data.columns else data.columns[-1]
+
 y = data[target_col]
 
-# 3. Eliminar columnas con fobia/fuga de datos (Data Leakage)
+# 3. Eliminar columnas con fuga de datos (Data Leakage)
 leakage = [
     'vehicle_id', 'listing_id', 'seller_id', 'dealer_id', target_col,
     'original_price', 'msrp', 'purchase_price', 'current_market_price',
@@ -32,7 +46,10 @@ print("Entrenando modelo XGBoost para precios de autos...")
 model = XGBRegressor(n_estimators=500, learning_rate=0.05, random_state=0, n_jobs=-1)
 model.fit(X_train, y_train)
 
-# 5. Guardar modelo y las columnas seleccionadas
-dump(model, pathlib.Path('model/car-price-v1.joblib'))
-dump(list(X.columns), pathlib.Path('model/features.joblib'))
+# 5. Asegurar que exista el directorio model/ y guardar artefactos
+output_dir = pathlib.Path('model')
+output_dir.mkdir(parents=True, exist_ok=True)
+
+dump(model, output_dir / 'car-price-v1.joblib')
+dump(list(X.columns), output_dir / 'features.joblib')
 print("¡Modelo guardado exitosamente en model/car-price-v1.joblib!")
