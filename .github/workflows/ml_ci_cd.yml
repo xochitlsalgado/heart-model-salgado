@@ -1,65 +1,48 @@
-name: ML heart-model
+name: ML CI/CD Pipeline
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
   repository_dispatch:
     types: [ml_ci_cd]
 
 jobs:
   ml_ci_cd:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: python version
-      run: python --version
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: pip install
-      run: pip install -r requirements.txt
+      - name: Download Dataset and Train Model
+        run: |
+          curl -L "${{ github.event.client_payload.dataseturl }}" -o dataset.csv
+          python train.py --dataset dataset.csv
 
-    - name: download dataset
-      run: |
-        mkdir -p data
-        if [ -n "${{ github.event.client_payload.dataseturl }}" ]; then
-          wget -O data/cars_dataset.csv "${{ github.event.client_payload.dataseturl }}"
-        fi
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USER }}/fastapiml:${{ github.event.client_payload.sha }} .
+          docker tag ${{ secrets.DOCKER_USER }}/fastapiml:${{ github.event.client_payload.sha }} ${{ secrets.DOCKER_USER }}/fastapiml:latest
 
-    - name: train model
-      run: |
-        if [ -f "data/cars_dataset.csv" ]; then
-          python model/train.py
-        else
-          echo "No se recibio dataseturl por API dispatch. Omitiendo train.py durante push por defecto."
-        fi
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: docker build
-      run: |
-        if [ -n "${{ github.event.client_payload.sha }}" ]; then
-          TAG="${{ github.event.client_payload.sha }}"
-        else
-          TAG="${{ github.sha }}"
-        fi
-        echo "TAG=$TAG" >> $GITHUB_ENV
-        docker build -t ${{ secrets.DOCKER_USER }}/${{ secrets.MODEL_NAME }}:$TAG .
+      - name: Push Docker Images
+        run: |
+          docker push ${{ secrets.DOCKER_USER }}/fastapiml:${{ github.event.client_payload.sha }}
+          docker push ${{ secrets.DOCKER_USER }}/fastapiml:latest
 
-    - name: docker login
-      env:
-        DOCKER_USER: ${{ secrets.DOCKER_USER }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
-
-    - name: docker Push
-      run: |
-        docker push ${{ secrets.DOCKER_USER }}/${{ secrets.MODEL_NAME }}:${{ env.TAG }}
-
+      # PASO NUEVO: Notificar a Render para que descargue la imagen 'latest'
+      - name: Trigger Render Deployment
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
